@@ -1,0 +1,78 @@
+# Copy this entire file into your GitHub repository as:
+# .github/workflows/build.yml
+#
+# Before saving it, upload Vaani-Studio-Android-Project.zip to the repository root.
+name: Build Vaani Studio from ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+      GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Open project ZIP
+        run: |
+          test -f Vaani-Studio-Android-Project.zip
+          mkdir app
+          unzip -q Vaani-Studio-Android-Project.zip -d app
+          test -f app/package-lock.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1"
+
+      - name: Install exact dependencies
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate and prepare app
+        working-directory: app
+        run: |
+          npm run check
+          npx expo prebuild --platform android --clean --no-install
+
+      - name: Build standalone APK
+        working-directory: app/android
+        run: ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Prepare APK
+        run: |
+          mkdir dist
+          cp app/android/app/build/outputs/apk/release/app-release.apk dist/Vaani-Studio.apk
+          cd dist
+          sha256sum Vaani-Studio.apk > Vaani-Studio.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vaani-Studio-APK
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
